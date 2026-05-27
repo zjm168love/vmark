@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>VMark Agent 编排:中心-辐射架构</title>
+<style>
+  :root {
+    --bg: #fafaf8;
+    --fg: #1a1a1a;
+    --muted: #666;
+    --accent: #0066cc;
+    --border: #d5d4d4;
+    --code-bg: #f0eeea;
+    --highlight: #fff3a3;
+  }
+  body {
+    font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    max-width: 760px;
+    margin: 40px auto;
+    padding: 0 24px;
+    line-height: 1.7;
+    font-size: 16px;
+  }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  h2 { font-size: 19px; margin-top: 36px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .subtitle { color: var(--muted); margin-top: 0; font-size: 14px; }
+  .wrong, .right {
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 12px 0;
+  }
+  .wrong { background: #ffebe9; border-left: 3px solid #cf222e; }
+  .right { background: #e6f4ea; border-left: 3px solid #16a34a; }
+  .label {
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .wrong .label { color: #cf222e; }
+  .right .label { color: #16a34a; }
+  pre {
+    background: var(--code-bg);
+    padding: 14px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px;
+  }
+  .diagram {
+    display: flex;
+    justify-content: center;
+    margin: 20px 0;
+  }
+  .hub {
+    text-align: center;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    padding: 18px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .hub .center {
+    display: inline-block;
+    padding: 6px 14px;
+    background: var(--accent);
+    color: white;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .hub .spokes {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .hub .spoke {
+    background: white;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .hub .arrows {
+    color: var(--muted);
+    font-size: 18px;
+    margin: 4px 0;
+  }
+  .takeaway {
+    background: var(--highlight);
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin-top: 24px;
+    font-weight: 500;
+  }
+  ul { padding-left: 22px; }
+  li { margin: 4px 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    margin: 12px 0;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--code-bg); font-weight: 600; }
+  td code { font-size: 12px; }
+  .chain {
+    background: var(--code-bg);
+    padding: 16px 18px;
+    border-radius: 6px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 12.5px;
+    line-height: 1.65;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .chain .step { color: var(--accent); font-weight: 600; }
+  .chain .file { color: var(--muted); }
+  .chain .warn { color: #9a6700; }
+  .chain .unsure { color: #cf222e; }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .badge.ok { background: #e6f4ea; color: #16a34a; }
+  .badge.warn { background: #fff3a3; color: #9a6700; }
+  .badge.unsure { background: #ffebe9; color: #cf222e; }
+  .nav {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 16px 0 24px;
+    font-size: 13px;
+  }
+  .nav a {
+    color: var(--accent);
+    text-decoration: none;
+    margin-right: 14px;
+  }
+  .nav a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>VMark Agent 编排的真实拓扑</h1>
+<p class="subtitle">中心-辐射架构 + 触发器 + 无人值守链</p>
+
+<div class="nav">
+  <a href="#topology">① 拓扑</a>
+  <a href="#triggers">② 触发器</a>
+  <a href="#chain">③ 无人值守链</a>
+  <a href="#local-vs-ci">④ 本地 vs CI</a>
+  <a href="#auth">⑤ Action 与鉴权</a>
+  <a href="#frontmatter">⑥ Agent 创建与参数</a>
+  <a href="#config">⑦ .claude/ 解剖与配置</a>
+</div>
+
+<h2 id="topology">① 常见的错误理解</h2>
+
+<div class="wrong">
+  <div class="label">✗ 流水线模型(误导)</div>
+<pre>planner → spec-guardian → impact-analyst → implementer → auditor → ...</pre>
+  <p style="margin: 6px 0 0; font-size: 14px;">
+    暗示 agent 之间直接传递 context,上游产出自动流到下游。
+    <strong>这是错的</strong> —— subagent 之间的 context 是完全隔离的。
+  </p>
+</div>
+
+<h2>真实拓扑</h2>
+
+<div class="right">
+  <div class="label">✓ 中心-辐射模型</div>
+  <div class="diagram">
+    <div class="hub">
+      <div class="center">主 Claude(orchestrator)</div>
+      <div class="arrows">↙ &nbsp; ↓ &nbsp; ↓ &nbsp; ↓ &nbsp; ↘</div>
+      <div class="spokes">
+        <div class="spoke">planner</div>
+        <div class="spoke">spec-guardian</div>
+        <div class="spoke">impact-analyst</div>
+        <div class="spoke">implementer</div>
+        <div class="spoke">auditor</div>
+      </div>
+      <div style="font-size: 11px; color: var(--muted); margin-top: 8px;">
+        每个 subagent = 一次性、无记忆的沙箱会话
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>主 Claude 是「记忆中转站」</h2>
+
+<p>subagent 之间互不通讯,全部回到主 Claude。主 Claude 负责把上游产出<strong>重打包</strong>塞进下游 prompt:</p>
+
+<pre>主 Claude 调 impact-analyst   → 收回影响图(文本)
+    ↓
+主 Claude 把这段文本记在自己 context 里
+    ↓
+主 Claude 调 implementer      → 在 prompt 里<b>显式塞进</b>影响图
+    "Work Item: XXX
+     Impacted files (from impact-analyst): [a.ts, b.ts, c.ts]
+     Constraints: TDD, no commits, files &lt;300 lines"</pre>
+
+<p>这一点在 <code>implementer.md</code> 里写死了:</p>
+
+<pre>## Delegation
+Provide subagents with:
+  - the Work Item text (goal + non-goals + acceptance)
+  - impacted file list (from impact-analyst)   ← 必须主动喂进去
+  - explicit constraints (TDD, no commits, ...)</pre>
+
+<h2>为什么这么设计?</h2>
+
+<p><code>.claude/rules/60-ai-governance.md</code> 第 8 条:</p>
+
+<blockquote style="border-left: 3px solid var(--border); padding-left: 14px; color: var(--muted); margin: 10px 0;">
+  每个前沿模型超过 ~300k token 就会退化(Chroma 2025)。
+  对于啰嗦任务(search、audit、research),派 subagent 而不是
+  让主线程累积 context。
+</blockquote>
+
+<p>隔离不是 bug,是 feature:</p>
+
+<ul>
+  <li><strong>impact-analyst</strong> 跑完释放 context — 主 Claude 只留它的最终结论(几百 token),不留它 grep 翻文件的几万 token 噪音</li>
+  <li><strong>implementer</strong> 拿到的是被「蒸馏」过的输入,不会被 spec-guardian 的 checklist、planner 的 ADR 干扰</li>
+  <li><strong>implementer 自己也会再开 sub-subagent</strong> 处理批量重命名等脏活,保持自己 context 清爽</li>
+</ul>
+
+<div class="takeaway">
+  <strong>一句话:</strong>没有「agent 之间直接传 context」这回事。主 Claude 是唯一的记忆载体和调度中枢,所有信息都靠它在 prompt 里手动转译塞给下一个 subagent —— 这既是必须的(沙箱隔离),也是有意的(避免 context 退化)。
+</div>
+
+<h2 id="triggers">② 触发器:谁按下第一个按钮</h2>
+
+<p>整个系统的入口只有 <strong>5 种</strong>,其余所有 agent 之间的「触发」都是 orchestrator 主动调 <code>Task</code> 工具,不是事件。</p>
+
+<table>
+  <thead>
+    <tr><th>入口</th><th>触发条件</th><th>本质</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1. Slash 命令</strong></td>
+      <td><code>/feature-workflow</code>、<code>/fix-issue #123</code>、<code>/bump</code> 等</td>
+      <td>用户按键 → 文件内容被作为 prompt 注入主 Claude</td>
+    </tr>
+    <tr>
+      <td><strong>2. Cron 定时</strong></td>
+      <td><code>claude-audit.yml:6</code> <code>cron: "0 9 * * *"</code></td>
+      <td>GitHub 调度器,真正「无人值守」的源头</td>
+    </tr>
+    <tr>
+      <td><strong>3. 事件链</strong></td>
+      <td><code>workflow_run</code>(audit 跑完续上)/ <code>issues</code> 标签</td>
+      <td>第一推动力还是 cron 或人开 issue</td>
+    </tr>
+    <tr>
+      <td><strong>4. PR push</strong></td>
+      <td><code>pull_request: [opened, synchronize]</code></td>
+      <td>git push</td>
+    </tr>
+    <tr>
+      <td><strong>5. 手动按钮</strong></td>
+      <td><code>workflow_dispatch</code>,GitHub Actions 页面</td>
+      <td>人点按钮</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>内部派遣</strong>:入口触发的总是主 Claude。它通过 <code>Task</code> 工具读 <code>.claude/agents/*.md</code>,在隔离沙箱里起一个 subagent —— 不是事件,是主动调函数。</p>
+
+<h2 id="chain">③ 无人值守链:每天自动修 bug 的完整路径</h2>
+
+<p>从 cron 到 PR auto-merge,基于实际文件核对:</p>
+
+<div class="chain"><span class="step">1.</span>  GitHub cron daemon                         <span class="file">claude-audit.yml:6  cron: "0 9 * * *"</span>
+        ↓ 触发
+<span class="step">2.</span>  claude-audit.yml workflow                  <span class="file">ubuntu runner, timeout 30min</span>
+        ↓ 跑
+<span class="step">3.</span>  anthropics/claude-code-action@v1           <span class="file">claude-audit.yml:30</span>
+        ↓ 注入 audit prompt(19 维度随机选 3)
+<span class="step">4.</span>  Claude session(audit)                     工具: <code>Bash,Read,Glob,Grep,WebSearch,WebFetch</code>
+                                              <code>--max-turns 120</code>
+        ↓ agent 自行用 Bash 调
+<span class="step">5.</span>  gh issue create                            按 5 段式模板批量建 audit 标签 issue
+        ↓ <span class="warn">workflow_run 事件</span>(bot 建的 issue 不触发 issues 事件,这里兜底)
+<span class="step">6.</span>  claude.yml audit-collect job               取 ≤6 个 open audit issue,跳过 fix-attempted
+        ↓ 输出 matrix
+<span class="step">7.</span>  audit-fix job                              <span class="warn">max-parallel: 3</span>(6 排队、3 并行)
+        ↓ 每个 runner 启动
+<span class="step">8.</span>  Claude session(fix)                       工具: <code>Bash Read Write Edit Glob Grep MultiEdit</code>
+                                              <code>--max-turns 50</code>
+        ↓ agent 调 Edit
+<span class="step">9.</span>  PreToolUse hook                            <span class="unsure">❓ 仓库文件无法证实 CI 是否加载 .claude/settings.json</span>
+        ↓ agent 调
+<span class="step">10.</span> gh pr create                               PR 打开,触发 pull_request 事件
+        ↓ 同一个 audit-fix job 继续
+<span class="step">11.</span> 主校验 session(inline)                    <span class="file">claude.yml:219-249</span>
+                                              工具: <code>Bash Read Glob Grep</code>,<code>--max-turns 10</code>
+                                              输出 VERIFIED / NOT VERIFIED / PARTIAL
+        ↓ 校验通过
+<span class="step">12.</span> gh pr merge --auto --squash                <span class="file">claude.yml:257</span>,等 CI 绿后 GitHub 自动 merge
+        ↓ 若主校验未跑(外部 PAT 创建的 PR 等)
+<span class="step">13.</span> audit-verify standalone job(fallback)     <span class="file">claude.yml:261-313</span>,只在 fallback 路径生效</div>
+
+<p style="font-size: 14px; color: var(--muted); margin-top: 8px;">
+  <span class="badge ok">✓</span> 真正的「按钮」只有第 1 步的 cron。
+  <span class="badge unsure">?</span> 第 9 步存疑(取决于 <code>claude-code-action@v1</code> 实现)。其他 12 步可从仓库文件证实。
+</p>
+
+<h2 id="local-vs-ci">④ 本地 vs CI 的触发差异</h2>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>本地 Claude Code</th><th>GHA Claude session</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>入口</strong></td>
+      <td>slash 命令 / 自由对话</td>
+      <td>cron / <code>workflow_run</code> / <code>pull_request</code> / <code>issues</code> / <code>workflow_dispatch</code></td>
+    </tr>
+    <tr>
+      <td><strong>Orchestrator</strong></td>
+      <td>本机 Claude Code CLI 进程</td>
+      <td>runner 上的 <code>anthropics/claude-code-action@v1</code></td>
+    </tr>
+    <tr>
+      <td><strong>派遣 subagent</strong></td>
+      <td><code>Task</code> 工具读 <code>.claude/agents/*</code>,起隔离沙箱</td>
+      <td>单次 prompt 注入,<strong>不调 Task</strong>,跑完即退</td>
+    </tr>
+    <tr>
+      <td><strong>工具集</strong></td>
+      <td>agent frontmatter <code>tools:</code> 字段决定</td>
+      <td>workflow 的 <code>--allowedTools</code> 收窄:<br>
+        • audit: <code>Bash,Read,Glob,Grep,WebSearch,WebFetch</code><br>
+        • fix: <code>Bash Read Write Edit Glob Grep MultiEdit</code><br>
+        • verify: <code>Bash Read Glob Grep</code></td>
+    </tr>
+    <tr>
+      <td><strong>PreToolUse hook</strong></td>
+      <td><span class="badge ok">✓</span> 生效(<code>gha-tdd-guard.mjs</code> 等)</td>
+      <td><span class="badge unsure">?</span> 无法从仓库文件证实</td>
+    </tr>
+    <tr>
+      <td><strong>轮次上限</strong></td>
+      <td>无硬性 max-turns(用户随时打断)</td>
+      <td><code>--max-turns</code> 硬上限:audit 120 / fix 50 / verify 10 / review 15</td>
+    </tr>
+    <tr>
+      <td><strong>失败兜底</strong></td>
+      <td>用户接管</td>
+      <td>给 issue 打 <code>fix-attempted</code> 标签,下次自动跳过(防死循环)</td>
+    </tr>
+    <tr>
+      <td><strong>commit / merge</strong></td>
+      <td>release-steward 等用户说 commit</td>
+      <td><code>gh pr merge --auto --squash</code>,CI 绿后 GitHub 自动 merge</td>
+    </tr>
+    <tr>
+      <td><strong>并发控制</strong></td>
+      <td>单进程,串行</td>
+      <td><code>concurrency.group</code> + <code>max-parallel: 3</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <strong>一句话差异:</strong>本地是「用户驱动 + 多 subagent 编排 + 本地 hook 兜底」,CI 是「事件驱动 + 单段 prompt + workflow 步骤兜底」。两者共享 <code>.claude/agents/*</code> 和 <code>.claude/rules/*</code> 文本(checkout 后都在 runner 里),但执行模型完全不同 —— 本地 orchestrator 反复调 Task,CI 一次性 prompt 跑完就退出。
+</div>
+
+<h2 id="auth">⑤ Action 与鉴权:CI 怎么调到 Claude</h2>
+
+<h3 style="font-size: 16px; margin-top: 20px;">启动方式:本质等价于 <code>claude -p</code></h3>
+
+<p><code>anthropics/claude-code-action@v1</code> 在 runner 里做的事拆开看就是:</p>
+
+<pre># 1. 装 Claude Code CLI(npm install -g @anthropic-ai/claude-code)
+# 2. 用 OAuth token 鉴权
+# 3. 用 -p / --print 模式跑 prompt:
+claude -p "&lt;workflow yaml 里 prompt: 块的全部内容&gt;" \
+       --model opus \
+       --max-turns 120 \
+       --allowed-tools "Bash,Read,Glob,Grep,WebSearch,WebFetch"</pre>
+
+<p>关键特征:</p>
+<ul>
+  <li><strong><code>-p</code> 模式</strong> = 一次性、非交互、stdout 给结果就退出(对应「CI 上单段 prompt 跑完即退」)</li>
+  <li>workflow yaml 里 <code>prompt: |</code> 块整段被传给 <code>-p</code> 后面</li>
+  <li><code>claude_args:</code> 里的所有参数原封不动透传给 <code>claude</code> CLI</li>
+</ul>
+
+<h3 style="font-size: 16px; margin-top: 20px;">claude-code-action 是什么:GitHub Action,不是插件</h3>
+
+<table>
+  <thead>
+    <tr><th>概念</th><th>在哪</th><th>例子</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>GitHub Action</td>
+      <td>公开仓库 / Marketplace,workflow 触发时临时拉取</td>
+      <td><code>anthropics/claude-code-action</code>、<code>actions/checkout</code></td>
+    </tr>
+    <tr>
+      <td>Claude Code CLI</td>
+      <td>npm 包,runner 上临时装</td>
+      <td><code>@anthropic-ai/claude-code</code></td>
+    </tr>
+    <tr>
+      <td>Claude Code 插件</td>
+      <td>本机 <code>.claude/plugins/</code></td>
+      <td><code>cc-suite@xiaolai</code>、<code>tdd-guardian@xiaolai</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>action 是「自动化包装层」,CLI 才是「真正干活的工具」,插件是「CLI 的扩展」</strong> —— 三者不是一回事。每次 workflow 触发,GitHub Actions 从 <code>github.com/anthropics/claude-code-action</code> 仓库拉 v1 tag,在 runner 里 <code>npm install</code> CLI、设环境变量、调 <code>claude -p</code>。</p>
+
+<h3 style="font-size: 16px; margin-top: 20px;">Token 怎么拿、怎么进 Secret</h3>
+
+<p><strong>本地一次性操作</strong>(前提:已用 Claude Max 或 Pro 订阅登录过):</p>
+
+<pre>claude setup-token</pre>
+
+<p>命令会走 OAuth 授权流程,终端打印一个长 token(形如 <code>sk-ant-oat01-...</code>),代表你的订阅授权。</p>
+
+<p><strong>放进 GitHub Secrets</strong>:</p>
+
+<pre>GitHub repo → Settings → Secrets and variables → Actions
+→ "New repository secret"
+   Name:  CLAUDE_CODE_OAUTH_TOKEN
+   Value: sk-ant-oat01-...</pre>
+
+<p>名字必须叫 <code>CLAUDE_CODE_OAUTH_TOKEN</code>,因为 workflow 硬编码引用:</p>
+
+<pre>claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}</pre>
+
+<p><strong>还需要 <code>PAT_TOKEN</code></strong>:默认 <code>GITHUB_TOKEN</code> 有反递归保护 —— 它创建的 PR/push 不会触发其他 workflow。audit-fix 创建的 PR 必须能再触发 CI 才能 merge,所以必须用 PAT。</p>
+
+<h3 style="font-size: 16px; margin-top: 20px;">为什么 AGENTS.md 还要强调「订阅优先」</h3>
+
+<p>看似废话(CI 已经在用订阅了),但<strong>规则的作用域不在 CI,在「人」</strong>。这条规则覆盖三个工具:</p>
+
+<ul>
+  <li><strong>Claude Code</strong> — 已经在用,但新人不知道有 OAuth</li>
+  <li><strong>Codex CLI</strong>(<code>.codex/agents/*.toml</code> 那套)— 也支持 ChatGPT Plus/Pro 订阅</li>
+  <li><strong>Gemini CLI</strong>(目前未用,规则覆盖以防未来加)</li>
+</ul>
+
+<p>它防的是 3 种「下意识踩坑」:</p>
+<ol>
+  <li>新贡献者本地装工具时默认被引导用 API key(文档先讲 API),不知道有订阅这条路</li>
+  <li>AI 自己写脚本调 Anthropic API 时下意识用 <code>ANTHROPIC_API_KEY</code></li>
+  <li>未来加新工具时,决策点上有现成的「订阅优先」原则,不用每次重新讨论</li>
+</ol>
+
+<p><strong>成本数字背书</strong>:Claude Opus API 约 $15 in / $75 out per MTok,单个 audit-fix 跑 50 轮约 $5-15,每天 6 个 = $30-90/天。订阅:Claude Max $200/月 = 每天 $6.67,额度内不再扣钱。<strong>数量级差异</strong>,规则就是要避免有人不小心用 API key 模式跑 CI,一晚上烧掉一个月订阅钱。</p>
+
+<div class="takeaway">
+  <strong>一句话:</strong>CI 用 <code>claude -p</code> 跑非交互模式,<code>claude-code-action</code> 是临时拉取的 GitHub Action 包装层;鉴权靠 <code>CLAUDE_CODE_OAUTH_TOKEN</code>(订阅)+ <code>PAT_TOKEN</code>(绕开默认 token 的反递归保护);「订阅优先」不是描述现状,是约束未来所有新加 AI 工具的默认选择,防止把钱烧在 API 计费上。
+</div>
+
+<h2 id="frontmatter">⑥ Agent 创建与约束</h2>
+
+<div class="wrong">
+  <div class="label">✗ 直觉理解</div>
+  <p style="margin: 4px 0 0; font-size: 14px;">
+    workflow 里写了「Plan (Planner agent)」「Implement (Implementer agent)」…
+    应该有某种 harness 检查机制,保证主 Claude 真的把这几个 agent 都派出去了 —— <strong>没有</strong>。
+  </p>
+</div>
+
+<div class="right">
+  <div class="label">✓ 实际机制:不验过程,验产物</div>
+  <p style="margin: 4px 0 0; font-size: 14px;">
+    harness <strong>不监控 Task 调用次数,也不强制顺序</strong>。
+    workflow.md 是散文,模型自己读自己派。系统只在 <strong>产物</strong> 这一层卡:每个 agent 该留下什么文件/代码/标记,缺了就过不去。
+  </p>
+</div>
+
+<h3 style="font-size: 16px; margin-top: 24px;">每个 agent 的「存在证据」</h3>
+
+<table>
+  <thead>
+    <tr><th>Agent</th><th>该产生的产物</th><th>谁来验</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>planner</code></td><td><code>dev-docs/plans/YYYYMMDD-*.md</code></td><td>下游 prompt 要引用此文件,缺了模型卡住</td></tr>
+    <tr><td><code>impact-analyst</code></td><td>影响文件清单(文本)</td><td><code>implementer.md</code> 模板把它拼进 prompt,缺了产出不完整</td></tr>
+    <tr><td><code>implementer</code></td><td>生产代码 + sibling <code>*.test.ts</code></td><td><span class="badge ok">硬</span> PreToolUse hook(<code>gha-tdd-guard.mjs</code>)拦 Write/Edit,无测试 exit 2</td></tr>
+    <tr><td><code>test-runner</code></td><td>测试通过 + 覆盖率达标</td><td><span class="badge ok">硬</span> <code>pnpm check:all</code> 阈值挂掉</td></tr>
+    <tr><td><code>auditor</code></td><td>零 findings</td><td><span class="badge ok">硬</span> Codex 二审循环,3 轮内未清空 → 不发 PR</td></tr>
+    <tr><td>—(整条链)</td><td><code>WI-1.2</code> 出现在 commit 或测试头</td><td><span class="badge ok">硬</span> <code>scripts/check-wi-linkage.sh</code></td></tr>
+    <tr><td>—(阶段)</td><td>Phase DoD</td><td><span class="badge ok">硬</span> <code>scripts/check-gha-phase.sh &lt;N&gt;</code></td></tr>
+    <tr><td><code>release-steward</code></td><td>commit</td><td>用户显式说 "commit"(人工闸)</td></tr>
+  </tbody>
+</table>
+
+<h3 style="font-size: 16px; margin-top: 24px;">为什么这样设计</h3>
+
+<p>如果主 Claude 偷懒、不派 planner 但自己写出等价 plan 文件,workflow 也能跑通 —— <strong>这是 feature,不是 bug</strong>。agent 边界存在的目的是 context 隔离(避免 300k 退化),不是流程警察。流程警察的活交给 hook 和脚本,它们不关心「谁写的」,只关心「写没写」。</p>
+
+<div class="takeaway">
+  <strong>一句话:</strong>没有任何机制直接保证「所有要求的 subagent 都被创建」。
+  保证的是 <strong>产物</strong> —— 每个 agent 该留下的文件/测试/标记,缺了被 PreToolUse hook、
+  <code>pnpm check:all</code>、DoD 脚本、Codex 二审挡住。
+  agent 是组织手段,不是合规手段。
+</div>
+
+<h2 id="config">⑦ .claude/ 目录解剖 + 三份配置文件</h2>
+
+<p>所有「编排」最终都落在文件上,但绝大多数 <code>.claude/*</code> 是<strong>给 LLM 看的静态文本</strong> —— 只有 <code>hooks/</code> 和 <code>settings.json</code> 会被真正执行。</p>
+
+<h3 style="font-size: 16px; margin-top: 20px;">各子目录加载时机</h3>
+
+<table>
+  <thead>
+    <tr><th>目录</th><th>谁读</th><th>何时加载</th><th>本质</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>rules/*.md</code></td><td>主 Claude</td><td><strong>开机自动注入</strong>(每次会话)</td><td>项目宪法 —— TDD、tokens、shortcuts</td></tr>
+    <tr><td><code>agents/*.md</code></td><td>harness</td><td>调 <code>Task</code> 工具时</td><td>沙箱画像 —— frontmatter 定 tools/skills</td></tr>
+    <tr><td><code>commands/*.md</code></td><td>主 Claude</td><td>用户敲 <code>/feature-workflow</code></td><td>整个文件 = 注入主 prompt 的剧本</td></tr>
+    <tr><td><code>skills/*/SKILL.md</code></td><td>主 Claude</td><td>按需(描述匹配)</td><td>领域知识包 —— Tiptap/Tauri/CSS</td></tr>
+    <tr><td><code>hooks/*.mjs</code></td><td><strong>外部进程</strong></td><td><strong>每次 Write/Edit 前</strong></td><td>真正会执行的代码 —— exit 2 即 block</td></tr>
+  </tbody>
+</table>
+
+<h3 style="font-size: 16px; margin-top: 20px;">三种信息流转</h3>
+
+<div class="chain"><span class="step">编排流</span>: 用户 /feature-workflow
+  → harness 把 commands/feature-workflow.md <b>全文</b>塞进主 Claude
+  → 主 Claude 自觉调 Task(planner)
+  → harness 读 agents/planner.md frontmatter,起隔离沙箱
+  → planner 文本结果返还主 Claude,主 Claude 手动重打包给下一个
+
+<span class="step">规则流</span>: rules/*.md <b>不需要调用</b>,会话开机自动进 system prompt
+  → subagent 也继承(harness 复用 project rules)
+
+<span class="step">拦截流</span>: 主 Claude 调 Edit
+  → settings.json 的 PreToolUse 触发
+  → 跑 hooks/gha-tdd-guard.mjs + multi-format-tdd-guard.mjs
+  → 任一 exit 2 → 工具调用被拒,主 Claude 必须先写测试</div>
+
+<h3 style="font-size: 16px; margin-top: 20px;">三份配置文件分工</h3>
+
+<table>
+  <thead>
+    <tr><th>文件</th><th>谁读</th><th>性质</th><th>放什么</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>.claude/settings.json</code></td>
+      <td><strong>Claude Code CLI 本体</strong></td>
+      <td>JSON 配置,<strong>不进 LLM context</strong></td>
+      <td>启用哪些插件、注册哪些 hook、权限白名单</td>
+    </tr>
+    <tr>
+      <td><code>CLAUDE.md</code></td>
+      <td>主 Claude</td>
+      <td>会话开机注入</td>
+      <td>仅 Claude 独有规则;本项目只有一行 <code>@AGENTS.md</code> + 一条「不用 project memory」</td>
+    </tr>
+    <tr>
+      <td><code>AGENTS.md</code></td>
+      <td>所有 AI 工具(Claude/Codex/Gemini)</td>
+      <td>跨工具宪法</td>
+      <td>编码风格、技术栈、Tauri 桥接、token 规则、auth 优先级</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>为什么这么分</strong>:VMark 用多个 AI 工具 —— Codex CLI、Gemini CLI 都不认 <code>CLAUDE.md</code>,但都认 <code>AGENTS.md</code>(OpenAI 主推的跨工具标准)。<code>CLAUDE.md</code> 只放 Claude 专属备注 + 一行 <code>@AGENTS.md</code> 转发指针,实现<strong>单源真相</strong>。而 <code>settings.json</code> 是另一个层级 —— 它告诉 CLI 进程怎么工作,主 Claude 只能看到它执行的结果(比如「工具被拒了」)。</p>
+
+<div class="takeaway">
+  <strong>一句话:</strong><code>.claude/</code> 90% 是文档,只有 <code>settings.json</code> 和 <code>hooks/</code> 会被「执行」。文档负责把规则、剧本、角色画像塞进 LLM 的 context;hooks 在工具调用边界做强制拦截。<code>CLAUDE.md → AGENTS.md</code> 是跨工具入口转发,<code>settings.json</code> 是 CLI 本体的工程配置 —— 三者各管一摊互不重叠。
+</div>
+
+</body>
+</html>
