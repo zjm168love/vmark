@@ -272,8 +272,11 @@ Provide subagents with:
     </tr>
     <tr>
       <td><strong>2. Cron 定时</strong></td>
-      <td><code>claude-audit.yml:6</code> <code>cron: "0 9 * * *"</code></td>
-      <td>GitHub 调度器,真正「无人值守」的源头</td>
+      <td>
+        <code>claude-audit.yml:6</code> <code>cron: "0 9 * * *"</code> —— 修 bug 链<br>
+        <code>claude-cost-report.yml:6</code> <code>cron: "0 12 * * *"</code> —— 账本结算
+      </td>
+      <td>GitHub 调度器,真正「无人值守」的源头(两条独立 cron)</td>
     </tr>
     <tr>
       <td><strong>3. 事件链</strong></td>
@@ -294,6 +297,11 @@ Provide subagents with:
 </table>
 
 <p><strong>内部派遣</strong>:入口触发的总是主 Claude。它通过 <code>Task</code> 工具读 <code>.claude/agents/*.md</code>,在隔离沙箱里起一个 subagent —— 不是事件,是主动调函数。</p>
+
+<p style="font-size: 13px; color: var(--muted); margin-top: -4px;">
+  <strong>术语澄清</strong>:本文档里的「Task 工具」是<strong>派遣 subagent</strong> 的工具,Claude Code 新版本里改名叫 <code>Agent</code>(同一个东西,旧名沿用)。
+  别和 <code>TaskCreate</code>/<code>TaskUpdate</code>/<code>TaskList</code> 混淆 —— 后者是<strong>本会话 TODO 列表</strong>的管理工具,跟 subagent 无关。
+</p>
 
 <h2 id="chain">③ 无人值守链:每天自动修 bug 的完整路径</h2>
 
@@ -332,6 +340,26 @@ Provide subagents with:
 <p style="font-size: 14px; color: var(--muted); margin-top: 8px;">
   <span class="badge ok">✓</span> 真正的「按钮」只有第 1 步的 cron。
   <span class="badge unsure">?</span> 第 9 步存疑(取决于 <code>claude-code-action@v1</code> 实现)。其他 12 步可从仓库文件证实。
+</p>
+
+<h3 style="font-size: 16px; margin-top: 24px;">并行的另一条 cron:成本结算(无 LLM 参与)</h3>
+
+<p>12:00 UTC(audit 跑完 3 小时后)<code>claude-cost-report.yml</code> 独立启动:</p>
+
+<div class="chain"><span class="step">A.</span> GitHub cron daemon                         <span class="file">claude-cost-report.yml:6  cron: "0 12 * * *"</span>
+        ↓
+<span class="step">B.</span> checkout <code>ref: data</code>                   <span class="file">账本在孤立分支 data,不污染 main</span>
+        ↓
+<span class="step">C.</span> 读 <code>.github/cost-reports/ledger.json</code>  汇总过去 24h 所有 Claude bot 的 token / $$
+        ↓
+<span class="step">D.</span> 关掉昨天的 cost-report issue                 滚动更新,不留旧 issue
+        ↓
+<span class="step">E.</span> 开新 cost-report issue + 数据写回 data 分支</div>
+
+<p style="font-size: 14px; color: var(--muted); margin-top: 8px;">
+  <strong>和修 bug 链的差异</strong>:纯 shell + <code>gh</code> CLI,<strong>不调 Claude、不派 subagent</strong>。
+  时间故意错开 3 小时,等当日 audit-fix 把账本写完再统计。
+  从 agent 编排角度看是「监控旁路」,但确实是仓库里的第二条无人值守 cron。
 </p>
 
 <h2 id="local-vs-ci">④ 本地 vs CI 的触发差异</h2>
@@ -546,7 +574,7 @@ claude -p "&lt;workflow yaml 里 prompt: 块的全部内容&gt;" \
     <tr><th>目录</th><th>谁读</th><th>何时加载</th><th>本质</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>rules/*.md</code></td><td>主 Claude</td><td><strong>开机自动注入</strong>(每次会话)</td><td>项目宪法 —— TDD、tokens、shortcuts</td></tr>
+    <tr><td><code>rules/*.md</code></td><td>主 Claude + <strong>所有 subagent</strong></td><td><strong>每次新 session 开机自动注入</strong>;subagent 继承同一套(harness 复用 project rules)</td><td>项目宪法 —— TDD、tokens、shortcuts</td></tr>
     <tr><td><code>agents/*.md</code></td><td>harness</td><td>调 <code>Task</code> 工具时</td><td>沙箱画像 —— frontmatter 定 tools/skills</td></tr>
     <tr><td><code>commands/*.md</code></td><td>主 Claude</td><td>用户敲 <code>/feature-workflow</code></td><td>整个文件 = 注入主 prompt 的剧本</td></tr>
     <tr><td><code>skills/*/SKILL.md</code></td><td>主 Claude</td><td>按需(描述匹配)</td><td>领域知识包 —— Tiptap/Tauri/CSS</td></tr>
@@ -600,8 +628,41 @@ claude -p "&lt;workflow yaml 里 prompt: 块的全部内容&gt;" \
 
 <p><strong>为什么这么分</strong>:VMark 用多个 AI 工具 —— Codex CLI、Gemini CLI 都不认 <code>CLAUDE.md</code>,但都认 <code>AGENTS.md</code>(OpenAI 主推的跨工具标准)。<code>CLAUDE.md</code> 只放 Claude 专属备注 + 一行 <code>@AGENTS.md</code> 转发指针,实现<strong>单源真相</strong>。而 <code>settings.json</code> 是另一个层级 —— 它告诉 CLI 进程怎么工作,主 Claude 只能看到它执行的结果(比如「工具被拒了」)。</p>
 
+<h3 style="font-size: 16px; margin-top: 24px;">插件 vs 本仓库 <code>.claude/</code></h3>
+
+<p><strong>插件不是「另一种东西」,是<code>.claude/</code> 同类内容的可分发打包</strong>。<code>docs-guardian/</code>、<code>tdd-guardian/</code> 这两个目录里的 JSON 就是插件的「项目级抽屉」 —— <strong>主 Claude 根本不读它们,是插件代码在用</strong>。</p>
+
+<table>
+  <thead>
+    <tr><th>组件类型</th><th>放在 <code>.claude/</code></th><th>放在插件里</th><th>有 prompt 吗</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Slash 命令</td><td><code>commands/*.md</code></td><td>插件的 commands/(例: <code>/cc-suite:audit</code>)</td><td><strong>有</strong> —— 调用时整段注入主 Claude</td></tr>
+    <tr><td>Subagent 定义</td><td><code>agents/*.md</code></td><td>插件的 agents/</td><td><strong>有</strong> —— Agent 工具调用时注入</td></tr>
+    <tr><td>Skill</td><td><code>skills/*/SKILL.md</code></td><td>插件的 skills/</td><td><strong>有</strong> —— description 匹配时注入</td></tr>
+    <tr><td>Hook</td><td><code>hooks/*.mjs</code></td><td>插件的 hooks/</td><td><strong>无</strong> —— 是脚本,不是 prompt</td></tr>
+    <tr><td>MCP server</td><td><code>.mcp.json</code> 里注册</td><td>插件自带(例: cc-suite 注册 <code>codex-cli</code>)</td><td><strong>无</strong> —— 提供工具,不是 prompt</td></tr>
+    <tr><td>持久化状态</td><td>—</td><td><strong><code>.claude/&lt;插件名&gt;/*.json</code></strong>(本项目 docs-guardian/、tdd-guardian/)</td><td><strong>无</strong> —— 插件代码读写</td></tr>
+  </tbody>
+</table>
+
+<p><strong>本仓库三个插件实际侧重</strong>(在 <code>settings.json</code> 的 <code>enabledPlugins</code> 里启用):</p>
+<ul>
+  <li><code>cc-suite@xiaolai</code> —— <strong>prompt 型</strong>:<code>/cc-suite:audit</code> 等一堆命令 + Codex MCP server,配置在根目录 <code>.cc-suite.md</code></li>
+  <li><code>tdd-guardian@xiaolai</code> —— <strong>hook + 状态型</strong>:gate 状态机存在 <code>.claude/tdd-guardian/state.json</code></li>
+  <li><code>docs-guardian@xiaolai</code> —— <strong>hook + 映射型</strong>:code→doc 对照表存在 <code>.claude/docs-guardian/config.json</code></li>
+</ul>
+
+<p><strong>真正的区别</strong>不是「有没有 prompt」,而是<strong>位置和分发</strong>:</p>
+<ul>
+  <li><code>.claude/</code> 内容 = <strong>跟仓库走</strong>(git 提交),只对本项目生效</li>
+  <li>插件内容 = 装在 <code>~/.claude/plugins/</code>,<strong>跨项目复用</strong>,用户得在 <code>settings.json</code> 主动启用</li>
+</ul>
+
+<p>所以「<code>tdd-guardian</code> 插件 vs <code>hooks/gha-tdd-guard.mjs</code>」是两套独立机制:前者是跨项目的 gate 状态机(commit 时查 gate),后者是本项目 hard-coded 的 Write/Edit 拦截器(工具调用时 exit 2)—— <strong>都叫 TDD 守卫,但作用点完全不同</strong>。</p>
+
 <div class="takeaway">
-  <strong>一句话:</strong><code>.claude/</code> 90% 是文档,只有 <code>settings.json</code> 和 <code>hooks/</code> 会被「执行」。文档负责把规则、剧本、角色画像塞进 LLM 的 context;hooks 在工具调用边界做强制拦截。<code>CLAUDE.md → AGENTS.md</code> 是跨工具入口转发,<code>settings.json</code> 是 CLI 本体的工程配置 —— 三者各管一摊互不重叠。
+  <strong>一句话:</strong><code>.claude/</code> 90% 是文档,只有 <code>settings.json</code> 和 <code>hooks/</code> 会被「执行」。文档负责把规则、剧本、角色画像塞进 LLM 的 context;hooks 在工具调用边界做强制拦截。<code>CLAUDE.md → AGENTS.md</code> 是跨工具入口转发,<code>settings.json</code> 是 CLI 本体的工程配置。<strong>插件 = 把上面这些做成可跨项目分发的包</strong> —— 启用后,它带的 prompt/hook 按各自机制注入,「有没有 prompt」取决于组件类型,不取决于是不是插件。
 </div>
 
 </body>
